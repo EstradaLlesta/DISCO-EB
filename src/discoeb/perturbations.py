@@ -126,8 +126,13 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     shearr = y[11 + lmaxg + lmaxgp] / 2.0
 
     # ... quintessence field
-    deltaq = y[-2]
-    thetaq = y[-1]
+    deltaq = y[-4]
+    thetaq = y[-3]
+
+    # New fields A and B
+    # ... quintessence field
+    A = y[-2]
+    B = y[-1]
 
     # ... evaluate thermodynamics
     # tempb   = param['tempba_of_tau_spline'].evaluate( tau ) / a
@@ -323,11 +328,21 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
 
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
-    f = f.at[-2].set( # BL10, eq. (3.5)
+    f = f.at[-4].set( # BL10, eq. (3.5)
         -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
-    f = f.at[-1].set( # BL10, eq. (3.6)
+    f = f.at[-3].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
+    )
+
+    # ---- New Field Eqs of motion -----------------------------------------------------------
+    # ... Ma, Chung-Pei; Bertschinger, Edmund 10.1086/176550 (MB95)
+    EightPiG = 3.33795017e-11
+    f = f.at[-2].set( # MB95, 
+        B
+    )
+    f = f.at[-1].set( # BL10, eq. (3.6)
+        -2*aprimeoa*B + 2*kmode**2*eta - 3*EightPiG*a**2*dgshear
     )
 
     return f.flatten()
@@ -368,6 +383,8 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
             deltar,  thetar / (aH),             # 14-15
             deltanu, thetanu / (aH),            # 16-17
             deltaq,  thetaq / (aH),             # 18-19
+            A,       B                          # 20-21 
+            PhiN, 
     where aH = \mathcal{H} = a' / a, which is the conformal Hubble rate.
     """
 
@@ -407,8 +424,13 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     thetanu = kmode * fnu / rho_plus_p
 
     # ... quintessence field
-    deltaq    = y[-2]
-    thetaq    = y[-1]
+    deltaq    = y[-4]
+    thetaq    = y[-3]
+
+    # ... quintessence field
+    A = y[-2]
+    B = y[-1]
+
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     rho_Q     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rho_Q * param['grhom'] * param['OmegaDE'] * thetaq * a**2
@@ -467,6 +489,12 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     thetam   += alpha * kmode**2
     thetabc  += alpha * kmode**2
 
+    # Newtonian and Bardeen potential
+    EightPiG = 3.33795017e-11
+    rhom  = param['grhom'] * param['Omegam'] / a**3
+    PhiN = rhom*(deltabc + (A-6*eta)/2)
+    PhiB = eta - aprimeoa*alpha
+
     ##################################################################################################################
 
     # store fields of interest
@@ -480,6 +508,8 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
         deltar,  thetar  / aprimeoa,        # 14-15
         deltanu, thetanu / aprimeoa,        # 16-17
         deltaq,  thetaq  / aprimeoa,        # 18-19
+        A,       B,                         # 20-21
+        PhiN,    PhiB                       # 22-23
     ])
             
     return yout
@@ -583,8 +613,40 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # higher moments are zero at the initial time
 
     # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
-    y = y.at[-2].set( deltaq )
-    y = y.at[-1].set( thetaq )
+    y = y.at[-4].set( deltaq )
+    y = y.at[-3].set( thetaq )
+
+    # New Field
+    h_init = 0
+    A =  h_init + 6*eta
+
+    _, _, fnu, _ = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3], nqmax=nqmax )
+    rho_Q     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
+    # dgrho = (
+    #     param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
+    #     + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
+    #     + param['grhom'] * param['OmegaDE'] * deltaq * rho_Q * a**2
+    # )
+    rho_plus_p_theta_Q = (1+w_Q) * rho_Q * param['grhom'] * param['OmegaDE'] * thetaq * a**2
+    dgtheta = (
+        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
+        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
+        + param['Nmnu'] * param['grhor'] * kmode * fnu / a**2
+        + rho_plus_p_theta_Q
+    )
+    # grho = (
+    #     param['grhom'] * param['Omegam'] / a
+    #     + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
+    #     + param['grhom'] * param['OmegaDE'] * rho_Q * a**2
+    #     + param['grhom'] * param['Omegak']
+    # )
+    #aprimeoa = jnp.sqrt(grho / 3.0)
+    hprime_init = 0 #(2.0 * kmode**2 * eta - dgrho) / aprimeoa
+    etaprime_init = 0.5 * dgtheta / kmode**2
+    B = hprime_init + 6*etaprime_init
+
+    y = y.at[-2].set( A )
+    y = y.at[-1].set( B )
     
     return y
 
@@ -699,7 +761,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     modelX = drx.ODETerm( modelX_ )
     
     # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
-    nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
+    nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2 + 2 # last +2 are A and B variables
 
     # ... determine starting time
     tau_start = determine_starting_time( param=param, k=kmode )
