@@ -338,18 +338,20 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     # ---- New Field Eqs of motion -----------------------------------------------------------
     # ... Ma, Chung-Pei; Bertschinger, Edmund 10.1086/176550 (MB95)
     EightPiG = 3.33795017e-11
-    f = f.at[-2].set( # MB95, 
+    const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
+    f = f.at[-2].set( # Aprime, 
         B
     )
-    f = f.at[-1].set( # BL10, eq. (3.6)
-        -2*aprimeoa*B + 2*kmode**2*eta - 3*EightPiG*a**2*dgshear
+    f = f.at[-1].set( # BL10, eq. (3.6), Bprime
+        -2*aprimeoa*B + 2*kmode**2*eta - 24*jnp.pi*const_G*a**2*dgshear# 3*EightPiG*a**2*dgshear
     )
 
     return f.flatten()
 
 
 def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
-    """Convert the synchronous gauge perturbations to the output fields.
+    """
+    Convert the synchronous gauge perturbations to the output fields.
 
     Parameters
     ----------
@@ -384,7 +386,7 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
             deltanu, thetanu / (aH),            # 16-17
             deltaq,  thetaq / (aH),             # 18-19
             A,       B                          # 20-21 
-            PhiN, 
+            PhiN, PhiB
     where aH = \mathcal{H} = a' / a, which is the conformal Hubble rate.
     """
 
@@ -491,9 +493,16 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
 
     # Newtonian and Bardeen potential
     EightPiG = 3.33795017e-11
-    rhom  = param['grhom'] * param['Omegam'] / a**3
-    PhiN = rhom*(deltabc + (A-6*eta)/2)
-    PhiB = eta - aprimeoa*alpha
+    rhom  = param['grhom'] * param['Omegam'] / a
+    dgrhom = (
+        param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
+    )
+    h_val = A - 6*eta
+    const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
+    PhiN =  -( dgrhom + rhom * (h_val/2) )/(kmode**2) # 4*jnp.pi*const_G *
+    PhiB = eta - aprimeoa*alpha # eta - 0.5*aprimeoa*(hprime/kmode**2)
+    # eta[:,a]-0.5*B[:,a]*aprimeoa[a]/kmodes**2
+    # alpha -> (hprime + 6.*etaprime)/2./kmode**2
 
     ##################################################################################################################
 
@@ -509,7 +518,8 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
         deltanu, thetanu / aprimeoa,        # 16-17
         deltaq,  thetaq  / aprimeoa,        # 18-19
         A,       B,                         # 20-21
-        PhiN,    PhiB                       # 22-23
+        PhiN,    PhiB,                      # 22-23
+        dgrho,   grho                       # 24-25
     ])
             
     return yout
