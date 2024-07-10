@@ -337,13 +337,14 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
 
     # ---- New Field Eqs of motion -----------------------------------------------------------
     # ... Ma, Chung-Pei; Bertschinger, Edmund 10.1086/176550 (MB95)
-    EightPiG = 3.33795017e-11
-    const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
+    # EightPiG = 3.33795017e-11
+    # const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
     f = f.at[-2].set( # Aprime, 
         B
     )
     f = f.at[-1].set( # BL10, eq. (3.6), Bprime
-        -2*aprimeoa*B + 2*kmode**2*eta - 24*jnp.pi*const_G*a**2*dgshear# 3*EightPiG*a**2*dgshear
+        # -2*aprimeoa*B + 2*kmode**2*eta - 24*jnp.pi*const_G*a**2*dgshear# 3*EightPiG*a**2*dgshear
+        -2*aprimeoa*B + 2*kmode**2*eta - 3*dgshear
     )
 
     return f.flatten()
@@ -386,7 +387,8 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
             deltanu, thetanu / (aH),            # 16-17
             deltaq,  thetaq / (aH),             # 18-19
             A,       B                          # 20-21 
-            PhiN, PhiB
+            PhiN, PhiB, Psi                     # 22-24
+            dgrho,   grho                       # 25-26
     where aH = \mathcal{H} = a' / a, which is the conformal Hubble rate.
     """
 
@@ -411,17 +413,20 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     # ... photons
     deltag = y[7]
     thetag = y[8]
+    shearg = y[9] / 2.0
 
     # ... massless neutrinos
     deltar = y[ 9 + lmaxg + lmaxgp]
     thetar = y[10 + lmaxg + lmaxgp]
+    shearr = y[11 + lmaxg + lmaxgp] / 2.0
 
     #... massive neutrinos
     rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a)))
     pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ) )
     rho_plus_p = rhonu + pnu
 
-    drhonu, _, fnu, _ = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3], nqmax=nqmax )
+    # drhonu, _, fnu, _ = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3], nqmax=nqmax )
+    drhonu, dpnu, fnu, shearnu = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3], nqmax=nqmax )
     deltanu = drhonu / rhonu
     thetanu = kmode * fnu / rho_plus_p
 
@@ -492,17 +497,23 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     thetabc  += alpha * kmode**2
 
     # Newtonian and Bardeen potential
-    EightPiG = 3.33795017e-11
+    # EightPiG = 3.33795017e-11
     rhom  = param['grhom'] * param['Omegam'] / a
     dgrhom = (
         param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
     )
     h_val = A - 6*eta
-    const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
-    PhiN =  -( dgrhom + rhom * (h_val/2) )/(kmode**2) # 4*jnp.pi*const_G *
+    # const_G = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
+    PhiN =  -( dgrhom + rhom * (h_val/2) )/(2*kmode**2) # 4*jnp.pi*const_G *
     PhiB = eta - aprimeoa*alpha # eta - 0.5*aprimeoa*(hprime/kmode**2)
     # eta[:,a]-0.5*B[:,a]*aprimeoa[a]/kmodes**2
     # alpha -> (hprime + 6.*etaprime)/2./kmode**2
+    dgshear = (
+        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
+        + param['Nmnu'] * param['grhor'] * shearnu / a**2
+    )
+    alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
+    Psi = alphaprime + aprimeoa*alpha # eta - 0.5*aprimeoa*(hprime/kmode**2)
 
     ##################################################################################################################
 
@@ -518,8 +529,8 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
         deltanu, thetanu / aprimeoa,        # 16-17
         deltaq,  thetaq  / aprimeoa,        # 18-19
         A,       B,                         # 20-21
-        PhiN,    PhiB,                      # 22-23
-        dgrho,   grho                       # 24-25
+        PhiN,    PhiB, Psi,                 # 22-24
+        dgrho,   grho                       # 25-26
     ])
             
     return yout
